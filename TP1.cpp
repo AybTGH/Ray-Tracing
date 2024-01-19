@@ -186,7 +186,7 @@ int main() {
             image[((H - i - 1) * W + j) * 3 + 2] = std::min(255., std::max(0., intensite_pix[2]));  // BLUE
         }
     }
-    stbi_write_png("image6.png", W, H, 3, &image[0], 0);
+    stbi_write_png("image7.png", W, H, 3, &image[0], 0);
 
     return 0;
 }
