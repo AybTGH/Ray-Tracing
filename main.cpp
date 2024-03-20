@@ -116,8 +116,7 @@ public: Object() {};
       Vector albedo;
       bool miroir;
       bool transp;
-      bool map_sphere_sqr;
-
+      bool sphere_txt;
 };
 
 class Triangle : public Object {
@@ -593,7 +592,6 @@ public:
         else {
             std::cerr << "Erreur lors du chargement de la texture : " << filename << std::endl;
         }
-        build_bvh(&bvh, 0, indices.size());
     }
 
     BoudingBox build_bbox(int i0, int i1)
@@ -627,67 +625,33 @@ public:
         return result;
     }
     void build_bvh(BVH* node, int i0, int i1) {
-        node->bbox = build_bbox(i0, i1);
-
-        // Définition des indices de début et de fin du noeud
         node->i0 = i0;
         node->i1 = i1;
-        node->fd = NULL;
-        node->fg = NULL;
-
-        // Calcul de la diagonale de la boîte englobante
+        node->bbox = build_bbox(node->i0, node->i1);
         Vector diag = node->bbox.bbMax - node->bbox.bbMin;
 
-        // Choix de la dimension de séparation en fonction de la plus grande composante de la diagonale
-        int split_dim;
-        if ((diag[0] > diag[1]) && (diag[0] > diag[2])) {
-            split_dim = 0;
-        }
-        else {
-            if ((diag[1] > diag[0]) && (diag[1] > diag[2])) {
-                split_dim = 1;
-            }
-            else {
-                split_dim = 2;
-            }
-        }
-        // Calcul de la valeur de séparation
-        double split_val = node->bbox.bbMin[split_dim] + diag[split_dim] * 0.5;
+        int split_dim = (diag[0] > diag[1]) ? ((diag[0] > diag[2]) ? 0 : 2) : ((diag[1] > diag[2]) ? 1 : 2);
+        double split_val = 0.5 * (node->bbox.bbMin[split_dim] + node->bbox.bbMax[split_dim]);
 
-        // Partitionnement des triangles en fonction de la valeur de séparation
-        int pivot = i0 - 1;
-        for (int i = i0; i < i1; i++) {
-            // Calcul du centre du triangle selon la dimension de séparation
-            double center_split_dim = (vertices[indices[i].vtxi][split_dim] + vertices[indices[i].vtxj][split_dim] + vertices[indices[i].vtxk][split_dim]) / 3.0;
-            if (center_split_dim < split_val) {
-                // Déplacement du triangle à gauche du pivot
+        int pivot = node->i0;
+        for (int i = node->i0; i < node->i1; ++i) {
+            double mid_point = (vertices[indices[i].vtxi][split_dim] + vertices[indices[i].vtxj][split_dim] + vertices[indices[i].vtxk][split_dim]) / 3.0;
+            if (mid_point < split_val) {
+                std::swap(indices[i], indices[pivot]);
                 pivot++;
-                std::swap(indices[i].vtxi, indices[pivot].vtxi);
-                std::swap(indices[i].vtxj, indices[pivot].vtxj);
-                std::swap(indices[i].vtxk, indices[pivot].vtxk);
-
-                std::swap(normals[indices[i].ni], normals[indices[pivot].ni]);
-                std::swap(normals[indices[i].nj], normals[indices[pivot].nj]);
-                std::swap(normals[indices[i].nk], normals[indices[pivot].nk]);
-
-                std::swap(uvs[indices[i].uvi], uvs[indices[pivot].uvi]);
-                std::swap(uvs[indices[i].uvj], uvs[indices[pivot].uvj]);
-                std::swap(uvs[indices[i].uvk], uvs[indices[pivot].uvk]);
-
-
-                std::swap(indices[i].group, indices[pivot].group);
             }
         }
-        // 
-        if (pivot <= i0 || pivot >= i1 || (i0 - i1 < 5)) return;
 
+        node->fg = nullptr;
+        node->fd = nullptr;
+        if (pivot == node->i0 || pivot == node->i1 || node->i1 - node->i0 < 5) {
+            return;
+        }
         node->fg = new BVH();
-        build_bvh(node->fg, i0, pivot);
-
+        build_bvh(node->fg, node->i0, pivot);
         node->fd = new BVH();
-        build_bvh(node->fd, pivot, i1);
+        build_bvh(node->fd, pivot, node->i1);
     }
-
 
     void rescale(double scale) {
         for (int i = 0; i < vertices.size(); i++) {
@@ -896,13 +860,12 @@ private:
 class Sphere : public Object
 {
 public:
-    Sphere(const Vector& centre, double Ray, const Vector& albedo, bool miroir = false, bool transp = false, bool map_sphere_sqr = false) : O(centre), R(Ray)
+    Sphere(const Vector& centre, double Ray, const Vector& albedo, bool miroir = false, bool transp = false, bool sphere_txt = false) : O(centre), R(Ray)
     {
         this->albedo = albedo;
         this->miroir = miroir;
         this->transp = transp;
-        this->map_sphere_sqr = map_sphere_sqr;
-
+        this->sphere_txt = sphere_txt;
     }
     bool intersect(const Ray& d, Vector& P, Vector& N, double& t, Vector& col) const
     {
@@ -924,7 +887,7 @@ public:
 
         P = d.origin + t * d.direction;
         N = (P - O).getNormalized();
-        if (map_sphere_sqr)
+        if (sphere_txt)
         {
             Vector Pc = P - O;
             double phi = atan2(Pc[2], Pc[0]);
@@ -946,7 +909,7 @@ public:
             }
         }
         else {
-            col = this->albedo;
+            col = albedo;
         }
 
         return true;
@@ -1118,12 +1081,11 @@ int main()
     Sphere s_lum(Vector(15, 40, 0), 15, Vector(1., 1., 1.));
 
     Sphere s0(Vector(-30, -2, -55), 15, Vector(1, 0, 0), false, true);  // Sphère à gauche
-    //Sphere s1(Vector(10, -2, -30), 20, Vector(1, 0, 0), true);  // Sphère à droite
-    Sphere s1_(Vector(20, -2, -10), 5, Vector(1.0, 0.5, 0.5));  // Sphère à droite
-    Sphere s1(Vector(-20, 0, -10), 15, Vector(1.0, 0.5, 0.5), false, true);  // Sphère à gauche
+    Sphere s1(Vector(10, -2, -30), 20, Vector(1, 0, 0), true);  // Sphère à droite
+    Sphere s1_(Vector(20, -2, -10), 10, Vector(1.0, 0.5, 0.5), false, false, true);  // Sphère à droite
 
 
-    Sphere s2(Vector(0, -2000 - 20, 0), 2000, Vector(1, 1, 1), false, false, true); //sol
+    Sphere s2(Vector(0, -2000 - 20, 0), 2000, Vector(1, 1, 1), false, false); //sol
     Sphere s3(Vector(0, 2000 + 100, 0), 2000, Vector(1, 1, 1)); // plafond
     Sphere s4(Vector(-2000 - 50, 0, 0), 2000, Vector(0.5, 0.5, 0.5)); // mur gauche
     Sphere s5(Vector(2000 + 50, 0, 0), 2000, Vector(0.5, 0.5, 0.5)); // mur droit
@@ -1131,20 +1093,22 @@ int main()
     Sphere s7(Vector(0, 0, 2000 + 100), 2000, Vector(1, 1, 0)); // mur arrière caméra
 
     TriangleMesh m1(Vector(1., 1., 1.), false, false);
-    m1.readOBJ("models/cat.obj");
+    m1.readOBJ("models/Chick.obj");
 
     //Triangle tri(Vector(-10, -2, -20), Vector(10, -10, -20), Vector(0, 10, -20), Vector(1, 0, 0));
-    double scale1 = 0.2; // Réduit le mesh de moitié.
-    double scale2 = 0.3; // Réduit le mesh de moitié.
+    double scale1 = 0.2; 
+    double scale2 = 0.2;
     m1.rescale(scale2);
-    Vector translation2(-40, -30, -10);
+    Vector translation2(-10, -10, -10);
+    double angle = 90;
     m1.translate(translation2);
-    m1.rotateY(-70);
-    m1.add_textures("models/cat_diff.png");
+    m1.rotateX(-70);
+    //m1.rotateY(-90);
+    m1.add_textures("models/birdDiffuseMap.jpg");
     s.addObject(s_lum);
     //s.addTriangle(tri);
     //s.addObject(s1);
-    //s.addObject(s1_);
+    s.addObject(s1_);
     //s.addObject(s0);
     s.addObject(s2);
     s.addObject(s3);
@@ -1157,8 +1121,8 @@ int main()
     s.lumiere = &s_lum;
     s.intensite_lumiere = 2000000000;  // Brighter light source
 
-    double fov = 60 * M_PI / 180;
-    int nbrays = 8;
+    double fov = 60 * M_PI / 240;
+    int nbrays = 100;
     int progress_counter = 0;
     double focus_distance = 55;
     std::vector<unsigned char> image(W * H * 3, 0);
@@ -1211,7 +1175,7 @@ int main()
     }
 
     // wwriting the image on a png file
-    stbi_write_png("Results/scene.png", W, H, 3, &image[0], 0);
+    stbi_write_png("Results/scene_finale.png", W, H, 3, &image[0], 0);
 
     // writing execution time on a txt file
     //std::ofstream execution_file;
